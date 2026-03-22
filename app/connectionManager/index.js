@@ -7,6 +7,8 @@ let _ConnectionManager_isRefreshing = new WeakMap();
 let _ConnectionManager_refreshTimeout = new WeakMap();
 let _ConnectionManager_boundRefresh = new WeakMap();
 let _ConnectionManager_boundDidFailLoad = new WeakMap();
+let _ConnectionManager_failCount = new WeakMap();
+let _ConnectionManager_boundPowerResume = new WeakMap();
 
 class ConnectionManager {
   get window() {
@@ -31,6 +33,7 @@ class ConnectionManager {
     _ConnectionManager_currentUrl.set(this, url || this.config.url);
     _ConnectionManager_isRefreshing.set(this, false);
     _ConnectionManager_refreshTimeout.set(this, null);
+    _ConnectionManager_failCount.set(this, 0);
 
     // Bind methods to preserve 'this' context
     const boundRefresh = this.debouncedRefresh.bind(this);
@@ -38,9 +41,12 @@ class ConnectionManager {
     _ConnectionManager_boundRefresh.set(this, boundRefresh);
     _ConnectionManager_boundDidFailLoad.set(this, boundDidFailLoad);
 
+    const boundPowerResume = () => this.debouncedRefresh(5000);
+    _ConnectionManager_boundPowerResume.set(this, boundPowerResume);
+
     // Retry connection when user clicks retry button on offline page
     ipcMain.on("offline-retry", boundRefresh);
-    powerMonitor.on("resume", boundRefresh);
+    powerMonitor.on("resume", boundPowerResume);  // 5s: allow VPN/DHCP to settle
     this.window.webContents.on("did-fail-load", boundDidFailLoad);
 
     this.refresh();
@@ -49,10 +55,14 @@ class ConnectionManager {
   cleanup() {
     const boundRefresh = _ConnectionManager_boundRefresh.get(this);
     const boundDidFailLoad = _ConnectionManager_boundDidFailLoad.get(this);
+    const boundPowerResume = _ConnectionManager_boundPowerResume.get(this);
 
     if (boundRefresh) {
       ipcMain.removeListener("offline-retry", boundRefresh);
-      powerMonitor.removeListener("resume", boundRefresh);
+    }
+
+    if (boundPowerResume) {
+      powerMonitor.removeListener("resume", boundPowerResume);
     }
 
     if (boundDidFailLoad && this.isWindowAvailable() && this.window.webContents) {
@@ -67,19 +77,15 @@ class ConnectionManager {
     }
   }
 
-  debouncedRefresh() {
-    // Clear any existing timeout
+  debouncedRefresh(delayMs = 1000) {
     const existingTimeout = _ConnectionManager_refreshTimeout.get(this);
     if (existingTimeout) {
       clearTimeout(existingTimeout);
     }
-
-    // Set a new timeout to debounce rapid network change events
     const timeout = setTimeout(() => {
       _ConnectionManager_refreshTimeout.set(this, null);
       this.refresh();
-    }, 1000); // Wait 1 second before actually refreshing
-
+    }, delayMs);
     _ConnectionManager_refreshTimeout.set(this, timeout);
   }
 
@@ -117,6 +123,7 @@ class ConnectionManager {
       }
 
       if (connected) {
+        _ConnectionManager_failCount.set(this, 0);
         if (hasUrl) {
           console.debug("Reloading current page...");
           try {
@@ -137,8 +144,12 @@ class ConnectionManager {
           }
         }
       } else {
-        this.window?.setTitle("No internet connection");
-        console.error("No internet connection");
+        const fails = (_ConnectionManager_failCount.get(this) || 0) + 1;
+        _ConnectionManager_failCount.set(this, fails);
+        const backoffMs = Math.min(30000, 1000 * Math.pow(2, fails - 1));
+        console.info(`[CONNECTION] Offline, retry in ${Math.round(backoffMs / 1000)}s (attempt ${fails})`);
+        this.window?.setTitle(`No internet — retrying in ${Math.round(backoffMs / 1000)}s...`);
+        this.debouncedRefresh(backoffMs);
       }
     } finally {
       _ConnectionManager_isRefreshing.set(this, false);
