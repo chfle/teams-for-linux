@@ -11,6 +11,19 @@ class CommandLineManager {
     // the first play and rejects subsequent audio on all renderer paths.
     app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
 
+    // Enable PipeWire-based screen-share audio capture on Linux
+    // This allows Teams to capture system audio during screen sharing
+    if (process.platform === 'linux') {
+      const existing = app.commandLine.hasSwitch('enable-features')
+        ? app.commandLine.getSwitchValue('enable-features')
+        : '';
+      const feature = 'PulseaudioLoopbackForScreenShare';
+      if (!existing.includes(feature)) {
+        const updated = existing ? `${existing},${feature}` : feature;
+        app.commandLine.appendSwitch('enable-features', updated);
+      }
+    }
+
     if (app.commandLine.hasSwitch("disable-features")) {
       const disabledFeatures = app.commandLine.getSwitchValue("disable-features").split(",");
       if (!disabledFeatures.includes("HardwareMediaKeyHandling")) {

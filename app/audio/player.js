@@ -14,9 +14,9 @@ function getPlatformPlayers() {
     return [{ cmd: 'powershell', args: (f) => ['-c', '(New-Object System.Media.SoundPlayer $args[0]).PlaySync()', '-args', f] }];
   }
   return [
-    { cmd: 'paplay', args: simpleArgs },
-    { cmd: 'pw-play', args: simpleArgs },
-    { cmd: 'aplay', args: simpleArgs },
+    { cmd: 'pw-play', args: simpleArgs },  // PipeWire native
+    { cmd: 'paplay', args: simpleArgs },   // PulseAudio
+    { cmd: 'aplay', args: simpleArgs },    // ALSA fallback
   ];
 }
 
