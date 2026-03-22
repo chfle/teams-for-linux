@@ -35,6 +35,15 @@ class CommandLineManager {
     } else {
       app.commandLine.appendSwitch("disable-features", "HardwareMediaKeyHandling");
     }
+
+    // Limit disk cache to 200 MB — Teams caches aggressively and can grow to GB without limit
+    app.commandLine.appendSwitch('disk-cache-size', String(200 * 1024 * 1024));
+
+    // Cap V8 heap at 512 MB per process — prevents runaway memory growth
+    // Note: do not set lower than 512 MB or Teams JavaScript bundles will crash
+    if (!app.commandLine.hasSwitch('js-flags')) {
+      app.commandLine.appendSwitch('js-flags', '--max-old-space-size=512');
+    }
   }
 
   static addSwitchesAfterConfigLoad(config) {
