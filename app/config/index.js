@@ -173,7 +173,7 @@ function extractYargConfig(configObject, appVersion) {
         type: "object",
       },
       chromeUserAgent: {
-        default: `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${process.versions.chrome} Safari/537.36`,
+        default: `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${process.versions.chrome} Safari/537.36`,
         describe: "Google Chrome User Agent",
         type: "string",
       },
@@ -319,7 +319,7 @@ function extractYargConfig(configObject, appVersion) {
         type: "array",
       },
       emulateWinChromiumPlatform: {
-        default: false,
+        default: true,
         describe:
           "Use windows platform information in chromium. This is helpful if MFA app does not support Linux.",
       },
