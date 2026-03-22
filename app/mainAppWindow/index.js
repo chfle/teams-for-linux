@@ -238,6 +238,15 @@ const AUTH_COOKIE_NAMES = new Set([
   'rtFa',
 ]);
 
+// Telemetry endpoints that can be blocked without breaking Teams functionality.
+// These are analytics/diagnostics collection endpoints, not Teams API endpoints.
+const TELEMETRY_BLOCK_HOSTS = new Set([
+  'browser.pipe.aria.microsoft.com',
+  'self.events.data.microsoft.com',
+  'mobile.pipe.aria.microsoft.com',
+  'browser.events.data.microsoft.com',
+]);
+
 // localStorage key patterns for MSAL/Teams auth tokens
 const AUTH_LOCAL_STORAGE_PATTERNS = [
   'tmp.auth.v1.', 'refresh_token', 'msal.token', 'msal.',
@@ -704,10 +713,9 @@ function onBeforeRequestHandler(details, callback) {
 
   if (customBackgroundRedirect) {
     callback(customBackgroundRedirect);
-  }
-  // Check if the counter was incremented
-  else if (aboutBlankRequestCount < 1) {
-    // Proceed normally
+  } else if (isBlockedTelemetry(details.url)) {
+    callback({ cancel: true });
+  } else if (aboutBlankRequestCount < 1) {
     callback({});
   } else {
     // Open request in hidden child window for authentication
@@ -730,6 +738,19 @@ const TEAMS_DOMAINS = [
   'teams.live.com',
   'statics.teams.cdn.office.net',
 ];
+
+/**
+ * Returns true if the request URL is a known telemetry-only endpoint
+ * that can be blocked without affecting Teams functionality.
+ */
+function isBlockedTelemetry(url) {
+  try {
+    const { hostname } = new URL(url);
+    return TELEMETRY_BLOCK_HOSTS.has(hostname);
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Checks whether a URL belongs to a Teams domain.
