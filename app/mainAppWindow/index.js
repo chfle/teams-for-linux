@@ -299,14 +299,40 @@ async function cleanExpiredAuthCookies(windowSession, forceCleanAll = false) {
   }
 }
 
+let authRecoveryTriggered = false;
+let authRecoveryAttempts = 0;
+const MAX_AUTH_RECOVERY_ATTEMPTS = 3;
+
 /**
- * Clears stale auth state (localStorage tokens + cookies) and reloads
- * the page to force a fresh interactive login.
+ * Tiered auth recovery. Each call escalates the cleanup level:
+ *   Tier 1 (attempt 1): reload only — lets Teams MSAL retry silently
+ *   Tier 2 (attempt 2): clear expired cookies, then reload
+ *   Tier 3 (attempt 3): full clear of localStorage auth tokens + all auth cookies, then reload
+ * The counter resets to 0 after Tier 3 and also on every successful page load.
  */
 async function triggerAuthRecovery() {
-  console.info('[AUTH_RECOVERY] Clearing auth state and reloading...');
+  authRecoveryAttempts++;
+  console.info(`[AUTH_RECOVERY] Recovery attempt ${authRecoveryAttempts}/${MAX_AUTH_RECOVERY_ATTEMPTS}`);
 
-  // Clear localStorage auth tokens via renderer
+  if (authRecoveryAttempts === 1) {
+    // Tier 1: Just reload — let Teams MSAL retry silently first
+    console.info('[AUTH_RECOVERY] Tier 1: reload for silent MSAL retry');
+    window.loadURL(config.url, { userAgent: config.chromeUserAgent });
+    return;
+  }
+
+  if (authRecoveryAttempts === 2) {
+    // Tier 2: Clear only expired cookies, then reload
+    console.info('[AUTH_RECOVERY] Tier 2: clearing expired cookies and reloading');
+    await cleanExpiredAuthCookies(window.webContents.session, false);
+    window.loadURL(config.url, { userAgent: config.chromeUserAgent });
+    return;
+  }
+
+  // Tier 3: Full clear — clear localStorage auth tokens + all auth cookies
+  console.info('[AUTH_RECOVERY] Tier 3: full auth state clear and reload');
+  authRecoveryAttempts = 0; // reset counter for next failure cycle
+
   try {
     const patternsJson = JSON.stringify(AUTH_LOCAL_STORAGE_PATTERNS);
     const cleared = await window.webContents.executeJavaScript(`
@@ -331,7 +357,6 @@ async function triggerAuthRecovery() {
   }
 
   await cleanExpiredAuthCookies(window.webContents.session, true);
-
   console.info('[AUTH_RECOVERY] Reloading for fresh auth...');
   window.loadURL(config.url, { userAgent: config.chromeUserAgent });
 }
@@ -428,7 +453,6 @@ exports.onAppReady = async function onAppReady(configGroup, customBackground, sh
   const AUTH_FAILURE_PATTERNS = ['InteractionRequired', 'AuthFailed'];
   // Only trust auth failure signals from Teams/Microsoft origins
   const TRUSTED_AUTH_SOURCES = ['teams.cloud.microsoft', 'teams.microsoft.com', 'login.microsoftonline.com'];
-  let authRecoveryTriggered = false;
   window.webContents.on('console-message', (event) => {
     if (authRecoveryTriggered) return;
     const message = event.message || '';
@@ -550,6 +574,10 @@ function onDidFinishLoad() {
     console.debug(`[CONNECTION] Skipping script injection on non-Teams page: ${currentUrl.split("?")[0]}`);
     return;
   }
+
+  // Reset auth recovery state so it can fire again if needed
+  authRecoveryTriggered = false;
+  authRecoveryAttempts = 0;
 
   window.webContents.executeJavaScript(`
 			openBrowserButton = document.querySelector('[data-tid=joinOnWeb]');
