@@ -86,15 +86,15 @@ class CommandLineManager {
   //   2. GPU — auto-disabled unless user overrides or XWayland optimizations are on
   //   3. Fake media UI — applied unless XWayland optimizations skip it
   static #configureWayland(config) {
-    // 1. PipeWire is always required for screen sharing on Wayland
+    // 1. PipeWire is always required for screen sharing on Wayland.
+    //    Merge WebRTCPipeWireCapturer into any existing enable-features value
+    //    instead of warning — other code (e.g. audio flags) may have set it first.
     if (app.commandLine.hasSwitch("enable-features")) {
       const features = app.commandLine.getSwitchValue("enable-features").split(",");
       if (!features.includes("WebRTCPipeWireCapturer")) {
-        console.warn(
-          "enable-features switch already set without WebRTCPipeWireCapturer. " +
-          "Screen sharing on Wayland may not work correctly. " +
-          "Please add WebRTCPipeWireCapturer to your enable-features list."
-        );
+        features.push("WebRTCPipeWireCapturer");
+        app.commandLine.appendSwitch("enable-features", features.join(","));
+        console.info("[Wayland] Merged WebRTCPipeWireCapturer into enable-features");
       }
     } else {
       console.info("[Wayland] Enabling PipeWire for screen sharing");
@@ -112,15 +112,24 @@ class CommandLineManager {
     }
 
     // 2. GPU handling: respect explicit user setting, otherwise auto-configure.
-    //    Native Wayland auto-disables GPU to prevent blank windows.
+    //    Native Wayland requires the GPU process even for software rendering
+    //    (Wayland compositors use DMA-BUF, not SHM). So when GPU must be disabled,
+    //    fall back to XWayland (ozone-platform=x11) which supports CPU/SHM rendering.
     //    XWayland with optimizations keeps GPU enabled for camera support (#2169).
     if (config.disableGpuExplicitlySet) {
       console.info(`[Wayland] Respecting user's disableGpu setting: ${config.disableGpu}`);
+      if (config.disableGpu && !isXWayland) {
+        console.info("[Wayland] GPU disabled — falling back to XWayland for software rendering");
+        app.commandLine.appendSwitch("ozone-platform", "x11");
+      }
     } else if (xwaylandOptimizations) {
       console.info("[Wayland] XWayland mode: keeping GPU enabled");
     } else {
-      console.info("[Wayland] Disabling GPU composition (default)");
+      // Default: disable GPU and use XWayland so software rendering works.
+      // Native Wayland + no GPU = GPU process crash (error_code=1002).
+      console.info("[Wayland] Disabling GPU, falling back to XWayland for compatibility");
       config.disableGpu = true;
+      app.commandLine.appendSwitch("ozone-platform", "x11");
     }
 
     // 3. Fake media UI: needed for screen sharing (#2217), but breaks camera
